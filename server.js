@@ -1,121 +1,172 @@
-var mongojs = require("mongojs");
+
 var cheerio = require("cheerio");
 var axios = require("axios");
 var express = require("express");
-var exphbs = require('express-handlebars');
-var mongoose = require('mongoose');
+var exphbs = require("express-handlebars");
+var mongoose = require('mongoose'); 
 var app = express();
-var PORT = process.env.PORT || 3000
-app.use(express.static("public"));
+var db = require('./models');
+// Mongoose
+
+var Note = require("./models/Note");
+var Article = require("./models/Article");
+var databaseUrl = 'mongodb://localhost/scrap';
+var MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost/mongoscraper";
+
+mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true, useCreateIndex: true });
+if (process.env.MONGODB_URI) {
+	mongoose.connect(process.env.MONGODB_URI);
+}
+else {
+	mongoose.connect('mongodb://localhost/mongoscraper');
+};
 
 
-app.engine("handlebars", exphbs({ defaultLayout: "main" }));
-app.set("view engine", "handlebars");
+var app = express();
+var port = process.env.PORT || 3000;
 
-var collections = ["scrapedData"];
+// var PORT = process.env.PORT || 3000;
 
-var db = mongojs(process.env.MONGODB_URI || 'scraper', collections);
-db.on("error", function (error) {
-  console.log("Database Error:", error);
+// app.use(express.static("public"));
+// app.use(express.urlencoded({ extended: false }));
+// app.engine("handlebars", exphbs({ defaultLayout: "main" }));
+// app.set("view engine", "handlebars");
+
+// // var db = require("./models");
+// var Note = require("./models/Note");
+// var Article = require("./models/Article");
+
+// // db.on("error", function(error) {
+// //   console.log("Database Error:", error);
+// // });
+
+// var MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost/mongoscraper";
+// mongoose.connect(MONGODB_URI, {useNewUrlParser: true, useUnifiedTopology: true});
+// mongoose.set("useCreateIndex", true);
+// mongoose.set("useUnifiedTopology", true);
+// mongoose.set('')
+// mongoose.set('useFindAndModify', false);
+// mongoose.Promise = global.Promise;
+var db = mongoose.connection;
+
+// // db.on("error", function(error) {
+// // 	console.log("Mongoose Error: ", error);
+// // });
+
+db.once("open", function() {
+	console.log("Mongoose connection successful.");
 });
 
+// Routes
+
 app.get("/", function(req, res) {
-    res.render("index");
-  })
+	Article.find({}, null, {sort: {created: -1}}, function(err, data) {
+		if(data.length === 0) {
+			res.render("placeholder", {message: "There's nothing scraped yet. Please click \"Scrape For Newest Articles\" for fresh and delicious news."});
+		}
+		else{
+			res.render("index", {articles: data});
+		}
+	});
+});
 
-  app.get("/scrape", function (req, res) {
+app.get("/scrape", function(req, res) {
+	request("https://www.nytimes.com/section/world", function(error, response, html) {
+		var $ = cheerio.load(html);
+		var result = {};
+		$("div.story-body").each(function(i, element) {
+			var link = $(element).find("a").attr("href");
+			var title = $(element).find("h2.headline").text().trim();
+			var summary = $(element).find("p.summary").text().trim();
+			var img = $(element).parent().find("figure.media").find("img").attr("src");
+			result.link = link;
+			result.title = title;
+			if (summary) {
+				result.summary = summary;
+			};
+			if (img) {
+				result.img = img;
+			}
+			else {
+				result.img = $(element).find(".wide-thumb").find("img").attr("src");
+			};
+			var entry = new Article(result);
+			Article.find({title: result.title}, function(err, data) {
+				if (data.length === 0) {
+					entry.save(function(err, data) {
+						if (err) throw err;
+					});
+				}
+			});
+		});
+		console.log("Scrape finished.");
+		res.redirect("/");
+	});
+});
 
-    db.scrapedData.drop()
-  
-    axios
-      .get("https://kotaku.com/")
-      .then(function (response) {
-        // Load the HTML into cheerio and save it to a variable
-        // '$' becomes a shorthand for cheerio's selector commands, much like jQuery's '$'
-        var $ = cheerio.load(response.data);
-  
-        // An empty array to save the data that we'll scrape
-        var results = [];
-  
-        // Select each element in the HTML body from which you want information.
-        // NOTE: Cheerio selectors function similarly to jQuery's selectors,
-        // but be sure to visit the package's npm page to see how it works
-        $("article").each(function (i, element) {
-          var title = $(element)
-            .find("h1")
-            .children("a")
-            .text();
-          var link = $(element)
-            .find("h1")
-            .children("a")
-            .attr("href");
-          var image = $(element)
-            .find("source")
-            .attr("data-srcset");
-          var summary = $(element)
-            .find("p").text();
-  
-         // If this found element had both a title and a link
-         if (title && link && image && summary) {
-  
-          
-          // Insert the data in the scrapedData db
-          db.scrapedData.insert({
-            title: title,
-            link: link,
-            image: image,
-            summary: summary
-          }, 
-          function(err, inserted) {
-            if (err) {
-              // Log the error if one is encountered during the query
-              console.log(err);
-            }
-            else {
-              // Otherwise, log the inserted data
-              console.log("scrapedData")
-              console.log(inserted);
-            }
-          });
-        }
-        });
-  
-        // Log the results once you've looped through each of the elements found with cheerio
-        console.log(results);
-      })
-  });
+app.get("/saved", function(req, res) {
+	Article.find({issaved: true}, null, {sort: {created: -1}}, function(err, data) {
+		if(data.length === 0) {
+			res.render("placeholder", {message: "You have not saved any articles yet. Try to save some delicious news by simply clicking \"Save Article\"!"});
+		}
+		else {
+			res.render("saved", {saved: data});
+		}
+	});
+});
 
-  // route 1
-app.get("/all", function (req, res) {
-    db.scrapedData.find({}, function (err, found) {
-      if (err) {
-        console.log(err)
-      } else {
-        res.json(found)
-      }
-    });
-  });
-  
-  
-  //title route 
-  app.get("/title", function(req, res) {
-   
-    db.scrapedData.find().sort({ title: 1 }, function(error, found) {
-      // Log any errors if the server encounters one
-      if (error) {
-        console.log(error);
-      }
-      // Otherwise, send the result of this query to the browser
-      else {
-        res.send(found);
-      }
-    });
-  });
-  
-  
-  
-  
-  
-  app.listen(PORT, function () {
-    console.log("App running on port 3000!");
-  });
+app.get("/:id", function(req, res) {
+	Article.findById(req.params.id, function(err, data) {
+		res.json(data);
+	})
+})
+
+app.post("/search", function(req, res) {
+	console.log(req.body.search);
+	Article.find({$text: {$search: req.body.search, $caseSensitive: false}}, null, {sort: {created: -1}}, function(err, data) {
+		console.log(data);
+		if (data.length === 0) {
+			res.render("placeholder", {message: "Nothing has been found. Please try other keywords."});
+		}
+		else {
+			res.render("search", {search: data})
+		}
+	})
+});
+
+app.post("/save/:id", function(req, res) {
+	Article.findById(req.params.id, function(err, data) {
+		if (data.issaved) {
+			Article.findByIdAndUpdate(req.params.id, {$set: {issaved: false, status: "Save Article"}}, {new: true}, function(err, data) {
+				res.redirect("/");
+			});
+		}
+		else {
+			Article.findByIdAndUpdate(req.params.id, {$set: {issaved: true, status: "Saved"}}, {new: true}, function(err, data) {
+				res.redirect("/saved");
+			});
+		}
+	});
+});
+
+app.post("/note/:id", function(req, res) {
+	var note = new Note(req.body);
+	note.save(function(err, doc) {
+		if (err) throw err;
+		Article.findByIdAndUpdate(req.params.id, {$set: {"note": doc._id}}, {new: true}, function(err, newdoc) {
+			if (err) throw err;
+			else {
+				res.send(newdoc);
+			}
+		});
+	});
+});
+
+app.get("/note/:id", function(req, res) {
+	var id = req.params.id;
+	Article.findById(id).populate("note").exec(function(err, data) {
+		res.send(data.note);
+	})
+})
+
+

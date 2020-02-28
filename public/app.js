@@ -1,33 +1,46 @@
-$.getJSON("/all", function(data){
-    console.log(data);
-    for (var i = 0; i < data.length; i++){
-      $("#results").append( "<tr><td>" + data[i].title + "</td>" +
-                              "<td><a href='" + data[i].link + "'>" + data[i].link + "</a></td>" +
-                              "<td><img src='" + data[i].image +  " '/></td>" + 
-                              "<td>" + data[i].summary + "</td></tr>");
-    }
-  
-  });
-  
-  function setActive(selector) {
-    $("th").removeClass("active");
-    $(selector).addClass("active");
-  }
+function shownote(event) {
+	event.preventDefault();
+	var id = $(this).attr("value");
+	$("#addnote").fadeIn(300).css("display", "flex");
+	$("#add-note").attr("value", id);
+	$.get("/" + id, function(data) {
+		$("#article-title").text(data.title);
+		$.get("/note/" + id, function(data) {
+			if (data) {
+				$("#note-title").val(data.title);
+				$("#note-body").val(data.body);
+			}
+		});
+	});
 
-  
-  $("#headline-sort").on("click", function(){
-    $("#tbody").empty();
-    setActive("#title");
-  
-    $.getJSON("/title", function(data){
-      console.log(data);
-      for (var i = 0; i < data.length; i ++) {
-        $("#tbody").append("<tr><td>" + data[i].title + "</td>" +
-        "<td><a href='" + data[i].link + "'>" + data[i].link + "</a></td>" +
-        "<td><img src='" + data[i].image +  " '/></td>" +
-        "<td>" + data[i].summary + "</td></tr>");
-      }
-    })
-  
-  });
-  
+}
+
+function addnote(event) {
+	event.preventDefault();
+	var id = $(this).attr("value");
+	var obj = {
+		title: $("#note-title").val().trim(),
+		body: $("#note-body").val().trim()
+	};
+	$.post("/note/" + id, obj, function(data) {
+		window.location.href = "/saved";
+	});
+}
+
+function changestatus() {
+	var status = $(this).attr("value");
+	if (status === "Saved") {
+		$(this).html("Unsave");
+	}
+};
+
+function changeback() {
+	$(this).html($(this).attr("value"));
+}
+
+$(document).on("click", ".addnote-button", shownote);
+$(document).on("click", "#add-note", addnote);
+$(".status").hover(changestatus, changeback);
+$("#close-note").on("click", function() {
+	$("#addnote").fadeOut(300);
+});
